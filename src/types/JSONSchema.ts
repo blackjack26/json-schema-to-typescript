@@ -41,6 +41,7 @@ export interface JSONSchema extends JSONSchema4 {
 }
 
 export const Parent = Symbol('Parent')
+export const DereferencedName = Symbol('DereferencedName')
 
 export interface LinkedJSONSchema extends JSONSchema {
   /**
@@ -48,6 +49,7 @@ export interface LinkedJSONSchema extends JSONSchema {
    * `null` when this is the root schema.
    */
   [Parent]: LinkedJSONSchema | null
+  [DereferencedName]?: string
 
   additionalItems?: boolean | LinkedJSONSchema
   additionalProperties?: boolean | LinkedJSONSchema
@@ -81,6 +83,7 @@ export const Intersection = Symbol('Intersection')
 export interface NormalizedJSONSchema extends Omit<LinkedJSONSchema, 'definitions' | 'id'> {
   [Intersection]?: NormalizedJSONSchema
   [Parent]: NormalizedJSONSchema | null
+  [DereferencedName]?: string
   [Types]: ReadonlySet<SchemaType>
 
   additionalItems?: boolean | NormalizedJSONSchema

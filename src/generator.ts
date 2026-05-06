@@ -299,12 +299,24 @@ function generateInterface(ast: TInterface, options: Options): string {
     ast.params
       .filter(_ => !_.isPatternProperty && !_.isUnreachableDefinition)
       .map(
-        ({isRequired, keyName, ast}) =>
-          [isRequired, keyName, ast, generateType(ast, options)] as [boolean, string, AST, string],
+        ({comment, deprecated, isRequired, keyName, ast}) =>
+          [comment, deprecated, isRequired, keyName, ast, generateType(ast, options)] as [
+            string | undefined,
+            boolean | undefined,
+            boolean,
+            string,
+            AST,
+            string,
+          ],
       )
       .map(
-        ([isRequired, keyName, ast, type]) =>
-          (hasComment(ast) && !ast.standaloneName ? generateComment(ast.comment, ast.deprecated) + '\n' : '') +
+        ([comment, deprecated, isRequired, keyName, ast, type]) =>
+          (comment !== undefined || deprecated === true
+            ? generateComment(comment, deprecated)
+            : hasComment(ast) && !ast.standaloneName
+              ? generateComment(ast.comment, ast.deprecated)
+              : '') +
+          (comment !== undefined || deprecated === true || (hasComment(ast) && !ast.standaloneName) ? '\n' : '') +
           escapeKeyName(keyName) +
           (isRequired ? '' : '?') +
           ': ' +

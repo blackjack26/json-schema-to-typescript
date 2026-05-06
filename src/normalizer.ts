@@ -1,4 +1,4 @@
-import {JSONSchemaTypeName, LinkedJSONSchema, NormalizedJSONSchema, Parent} from './types/JSONSchema'
+import {DereferencedName, JSONSchemaTypeName, LinkedJSONSchema, NormalizedJSONSchema, Parent} from './types/JSONSchema'
 import {appendToDescription, escapeBlockComment, isSchemaLike, justName, toSafeString, traverse} from './utils'
 import {Options} from './'
 import {applySchemaTyping} from './applySchemaTyping'
@@ -82,6 +82,15 @@ rules.set('Add an $id to anything that needs it', (schema, fileName, _options, _
     return
   }
 
+  const dereferencedName = dereferencedPaths.get(schema)
+  if (dereferencedName) {
+    Object.defineProperty(schema, DereferencedName, {
+      enumerable: false,
+      value: dereferencedName,
+      writable: true,
+    })
+  }
+
   // Top-level schema
   if (!schema.$id && !schema[Parent]) {
     schema.$id = toSafeString(justName(fileName))
@@ -90,12 +99,14 @@ rules.set('Add an $id to anything that needs it', (schema, fileName, _options, _
 
   // Sub-schemas with references
   if (!isArrayType(schema) && !isObjectType(schema)) {
+    if (dereferencedName) {
+      dereferencedPaths.delete(schema)
+    }
     return
   }
 
   // We'll infer from $id and title downstream
   // TODO: Normalize upstream
-  const dereferencedName = dereferencedPaths.get(schema)
   if (!schema.$id && !schema.title && dereferencedName) {
     schema.$id = toSafeString(justName(dereferencedName))
   }

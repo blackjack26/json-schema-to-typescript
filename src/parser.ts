@@ -13,7 +13,7 @@ import type {
   SchemaSchema,
   SchemaType,
 } from './types/JSONSchema'
-import {Intersection, Types, getRootSchema, isBoolean, isPrimitive} from './types/JSONSchema'
+import {DereferencedName, Intersection, Types, getRootSchema, isBoolean, isPrimitive} from './types/JSONSchema'
 import {generateName, log, maybeStripDefault} from './utils'
 
 export type Processed = Map<NormalizedJSONSchema, Map<SchemaType, AST>>
@@ -380,13 +380,10 @@ function parseSchema(
   usedNames: UsedNames,
   parentSchemaName: string,
 ): TInterfaceParam[] {
-  let asts: TInterfaceParam[] = map(schema.properties, (value, key: string) => ({
-    ast: parse(value, options, key, processed, usedNames),
-    isPatternProperty: false,
-    isRequired: includes(schema.required || [], key),
-    isUnreachableDefinition: false,
-    keyName: key,
-  }))
+  const rootSchema = getRootSchema(schema)
+  let asts: TInterfaceParam[] = map(schema.properties, (value, key: string) =>
+    parseInterfaceParam(value, key, schema, rootSchema, options, processed, usedNames),
+  )
 
   let singlePatternProperty = false
   if (schema.patternProperties) {
@@ -403,6 +400,8 @@ via the \`patternProperty\` "${key.replace('*/', '*\\/')}".`
         ast.comment = ast.comment ? `${ast.comment}\n\n${comment}` : comment
         return {
           ast,
+          comment: getPropertyComment(value, ast, rootSchema),
+          deprecated: getPropertyDeprecated(value, ast, rootSchema),
           isPatternProperty: !singlePatternProperty,
           isRequired: singlePatternProperty || includes(schema.required || [], key),
           isUnreachableDefinition: false,
@@ -459,6 +458,141 @@ via the \`definition\` "${key}".`
         keyName: '[k: string]',
       })
   }
+}
+
+function parseInterfaceParam(
+  schema: NormalizedJSONSchema,
+  key: string,
+  parentSchema: SchemaSchema,
+  rootSchema: NormalizedJSONSchema,
+  options: Options,
+  processed: Processed,
+  usedNames: UsedNames,
+): TInterfaceParam {
+  const canonicalSchema = getCanonicalSchema(schema, rootSchema)
+  const ast = parse(canonicalSchema ?? schema, options, key, processed, usedNames)
+
+  return {
+    ast,
+    comment: getPropertyComment(schema, ast, rootSchema),
+    deprecated: getPropertyDeprecated(schema, ast, rootSchema),
+    isPatternProperty: false,
+    isRequired: includes(parentSchema.required || [], key),
+    isUnreachableDefinition: false,
+    keyName: key,
+  }
+}
+
+function getPropertyComment(
+  schema: NormalizedJSONSchema,
+  ast: AST,
+  rootSchema: NormalizedJSONSchema,
+): string | undefined {
+  const canonicalSchema = getCanonicalSchema(schema, rootSchema)
+  if (!ast.standaloneName) {
+    return undefined
+  }
+  if (!canonicalSchema) {
+    return undefined
+  }
+  return schema.description !== canonicalSchema.description ? schema.description : undefined
+}
+
+function getPropertyDeprecated(
+  schema: NormalizedJSONSchema,
+  ast: AST,
+  rootSchema: NormalizedJSONSchema,
+): boolean | undefined {
+  const canonicalSchema = getCanonicalSchema(schema, rootSchema)
+  if (!ast.standaloneName) {
+    return undefined
+  }
+  if (!canonicalSchema) {
+    return undefined
+  }
+  return schema.deprecated !== canonicalSchema.deprecated ? schema.deprecated : undefined
+}
+
+function getCanonicalSchema(
+  schema: NormalizedJSONSchema,
+  rootSchema: NormalizedJSONSchema,
+): NormalizedJSONSchema | undefined {
+  const dereferencedName = schema[DereferencedName]
+  const fragmentStart = dereferencedName?.indexOf('#/')
+  if (!dereferencedName || fragmentStart == null || fragmentStart < 0) {
+    return undefined
+  }
+
+  const definition = dereferencedName
+    .slice(fragmentStart + 2)
+    .split('/')
+    .map((segment, index) => (index === 0 && segment === 'definitions' ? '$defs' : segment))
+    .reduce<unknown>((current, segment) => {
+      if (!current || typeof current !== 'object') {
+        return undefined
+      }
+      return (current as Record<string, unknown>)[segment]
+    }, rootSchema)
+
+  if (!definition || definition === schema) {
+    return undefined
+  }
+
+  return schemasEqualIgnoringAnnotations(definition, schema) ? (definition as NormalizedJSONSchema) : undefined
+}
+
+function schemasEqualIgnoringAnnotations(
+  left: unknown,
+  right: unknown,
+  seen = new WeakMap<object, WeakSet<object>>(),
+): boolean {
+  if (left === right) {
+    return true
+  }
+
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false
+    }
+
+    return left.every((value, index) => schemasEqualIgnoringAnnotations(value, right[index], seen))
+  }
+
+  if (!isPlainObject(left) || !isPlainObject(right)) {
+    return left === right
+  }
+
+  const leftObject = left as Record<string, unknown>
+  const rightObject = right as Record<string, unknown>
+
+  const seenRights = seen.get(leftObject)
+  if (seenRights?.has(rightObject)) {
+    return true
+  }
+  if (seenRights) {
+    seenRights.add(rightObject)
+  } else {
+    seen.set(leftObject, new WeakSet([rightObject]))
+  }
+
+  const leftKeys = Object.keys(leftObject).filter(key => key !== 'description' && key !== 'deprecated')
+  const rightKeys = Object.keys(rightObject).filter(key => key !== 'description' && key !== 'deprecated')
+
+  if (leftKeys.length !== rightKeys.length) {
+    return false
+  }
+
+  for (const key of leftKeys) {
+    if (!rightKeys.includes(key)) {
+      return false
+    }
+
+    if (!schemasEqualIgnoringAnnotations(leftObject[key], rightObject[key], seen)) {
+      return false
+    }
+  }
+
+  return true
 }
 
 type Definitions = {[k: string]: NormalizedJSONSchema}

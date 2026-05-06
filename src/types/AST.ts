@@ -91,6 +91,8 @@ export interface TNever extends AbstractAST {
 
 export interface TInterfaceParam {
   ast: AST
+  comment?: string
+  deprecated?: boolean
   keyName: string
   isRequired: boolean
   isPatternProperty: boolean
